@@ -1,5 +1,4 @@
 name: Deploy Soroban Contract to Testnet
-
 on:
   workflow_dispatch:
     inputs:
@@ -8,84 +7,72 @@ on:
         default: 'yes'
         type: choice
         options: ['yes', 'no']
-
 jobs:
   deploy:
     runs-on: ubuntu-latest
     outputs:
       contract_id: ${{ steps.deploy.outputs.CONTRACT_ID }}
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Check secrets are set
+      - uses: actions/checkout@v4
+      
+      - name: Check secrets
         run: |
-          if [ -z "${{ secrets.ADMIN_SECRET_KEY }}" ]; then
-            echo "❌ ERROR: ADMIN_SECRET_KEY secret is not set!"
-            exit 1
-          fi
-          if [ -z "${{ secrets.ADMIN_PUBLIC_KEY }}" ]; then
-            echo "❌ ERROR: ADMIN_PUBLIC_KEY secret is not set!"
-            exit 1
-          fi
-          echo "✅ Secrets are configured"
-
-      - name: Install Rust stable + wasm32v1-none target
-        uses: dtolnay/rust-toolchain@stable
+          [ -z "${{ secrets.ADMIN_SECRET_KEY }}" ] && echo "❌ ADMIN_SECRET_KEY not set!" && exit 1
+          [ -z "${{ secrets.ADMIN_PUBLIC_KEY }}" ] && echo "❌ ADMIN_PUBLIC_KEY not set!" && exit 1
+          echo "✅ Secrets OK"
+          
+      - uses: dtolnay/rust-toolchain@stable
         with:
           targets: wasm32v1-none
-
-      - name: Cache Cargo registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            ~/.cargo/bin/stellar
-          key: ${{ runner.os }}-stellar-cli-v25-cargo
-
-      - name: Install Stellar CLI
+          
+      - name: Install Stellar CLI (Binary)
         run: |
-          if command -v stellar &> /dev/null; then
-            echo "✅ Stellar CLI already cached: $(stellar --version)"
-          else
-            echo "Installing Stellar CLI via cargo..."
-            cargo install --locked stellar-cli --features opt
-          fi
+          wget -qO stellar.tar.gz https://github.com/stellar/stellar-cli/releases/download/v25.2.0/stellar-cli-v25.2.0-x86_64-unknown-linux-gnu.tar.gz
+          mkdir stellar-bin
+          tar -xzf stellar.tar.gz -C stellar-bin --strip-components=1
+          sudo mv stellar-bin/stellar /usr/local/bin/
           stellar --version
-
-      - name: Cache contract build
-        uses: actions/cache@v4
+          
+      - uses: actions/cache@v4
         with:
           path: contracts/target
-          key: ${{ runner.os }}-contract-${{ hashFiles('contracts/**/*.rs', 'contracts/**/Cargo.toml') }}
-
+          key: contract-${{ hashFiles('contracts/**/*.rs') }}
+          
       - name: Build contract
         working-directory: contracts/prediction_market
-        run: |
-          stellar contract build
-          echo "✅ WASM built:"
-          ls -lh ../target/wasm32v1-none/release/prediction_market.wasm
-
-      - name: Register admin identity
+        run: stellar contract build
+        
+      - name: Add admin key
         env:
           ADMIN_SECRET_KEY: ${{ secrets.ADMIN_SECRET_KEY }}
-        run: |
-          echo "$ADMIN_SECRET_KEY" | stellar keys add admin --secret-key
-          echo "✅ Admin identity registered"
-
-      - name: Deploy contract to Testnet
+        run: echo "$ADMIN_SECRET_KEY" | stellar keys add admin --secret-key
+        
+      - name: Deploy
         id: deploy
-        env:
-          ADMIN_PUBLIC_KEY: ${{ secrets.ADMIN_PUBLIC_KEY }}
         run: |
-          echo "Deploying to Stellar Testnet..."
-          CONTRACT_ID=$(stellar contract deploy \
+          ID=$(stellar contract deploy \
             --wasm contracts/target/wasm32v1-none/release/prediction_market.wasm \
             --source admin \
             --rpc-url https://soroban-testnet.stellar.org \
             --network-passphrase "Test SDF Network ; September 2015")
-
-          echo "CONTRACT_ID=$CONTRACT_ID" >> $GITHUB_OUTPUT
-          echo "=================================================="
+          echo "CONTRACT_ID=$ID" >> $GITHUB_OUTPUT
+          echo "✅ Contract ID: $ID"
+          
+      - name: Initialize
+        if: ${{ github.event.inputs.initialize == 'yes' }}
+        env:
+          CID: ${{ steps.deploy.outputs.CONTRACT_ID }}
+          ADMIN: ${{ secrets.ADMIN_PUBLIC_KEY }}
+        run: |
+          stellar contract invoke --id "$CID" --source admin \
+            --rpc-url https://soroban-testnet.stellar.org \
+            --network-passphrase "Test SDF Network ; September 2015" \
+            -- initialize --admin "$ADMIN" \
+            --token CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC
+          echo "✅ Initialized!"
+          
+      - name: Summary
+        if: always()
+        run: |
+          CID="${{ steps.deploy.outputs.CONTRACT_ID }}"
+          echo "## CONTRACT_ID: $CID" >> $GITHUB_STEP_SUMMARY
