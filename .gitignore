@@ -1,0 +1,27 @@
+# Environment files - NEVER commit these!
+backend/.env
+frontend/.env.local
+
+# Node
+node_modules/
+.next/
+dist/
+build/
+
+# Rust/Cargo
+contracts/target/
+
+# Database
+backend/*.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/settings.json
+.idea/

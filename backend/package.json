@@ -1,0 +1,22 @@
+{
+  "name": "stellarbet-backend",
+  "version": "1.0.0",
+  "description": "StellarBet prediction market backend API",
+  "main": "src/index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node --experimental-sqlite --watch src/index.js",
+    "start": "node --experimental-sqlite src/index.js"
+  },
+  "dependencies": {
+    "@stellar/stellar-sdk": "^15.0.1",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "jsonwebtoken": "^9.0.2",
+    "node-cron": "^3.0.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0"
+  }
+}

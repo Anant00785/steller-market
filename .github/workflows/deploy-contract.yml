@@ -1,0 +1,131 @@
+name: Deploy Soroban Contract to Testnet
+
+on:
+  workflow_dispatch:
+    inputs:
+      initialize:
+        description: 'Initialize contract after deploy?'
+        default: 'yes'
+        type: choice
+        options: ['yes', 'no']
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    outputs:
+      contract_id: ${{ steps.deploy.outputs.CONTRACT_ID }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable + wasm32v1-none target
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32v1-none
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+          key: ${{ runner.os }}-cargo-${{ hashFiles('contracts/**/Cargo.lock') }}
+
+      - name: Install Stellar CLI
+        run: |
+          wget -qO stellar.tar.gz https://github.com/stellar/stellar-cli/releases/download/v25.2.0/stellar-cli-v25.2.0-x86_64-unknown-linux-gnu.tar.gz
+          tar -xzf stellar.tar.gz
+          sudo mv stellar /usr/local/bin/stellar
+          stellar --version
+
+      - name: Build contract
+        working-directory: contracts/prediction_market
+        run: stellar contract build
+
+      - name: Register admin identity
+        env:
+          ADMIN_SECRET_KEY: ${{ secrets.ADMIN_SECRET_KEY }}
+        run: |
+          echo "$ADMIN_SECRET_KEY" | stellar keys add admin --secret-key
+
+      - name: Deploy contract to Testnet
+        id: deploy
+        run: |
+          CONTRACT_ID=$(stellar contract deploy \
+            --wasm contracts/target/wasm32v1-none/release/prediction_market.wasm \
+            --source admin \
+            --network testnet \
+            --rpc-url https://soroban-testnet.stellar.org \
+            --network-passphrase "Test SDF Network ; September 2015")
+          
+          echo "CONTRACT_ID=$CONTRACT_ID" >> $GITHUB_OUTPUT
+          echo ""
+          echo "=================================================="
+          echo "  ✅ CONTRACT DEPLOYED SUCCESSFULLY!"
+          echo "  CONTRACT_ID: $CONTRACT_ID"
+          echo "=================================================="
+
+      - name: Initialize contract
+        if: ${{ github.event.inputs.initialize == 'yes' }}
+        env:
+          CONTRACT_ID: ${{ steps.deploy.outputs.CONTRACT_ID }}
+          ADMIN_PUBLIC_KEY: ${{ secrets.ADMIN_PUBLIC_KEY }}
+          # Native XLM SAC on Testnet (always available, no setup needed)
+          TOKEN_ADDRESS: CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC
+        run: |
+          stellar contract invoke \
+            --id "$CONTRACT_ID" \
+            --source admin \
+            --network testnet \
+            --rpc-url https://soroban-testnet.stellar.org \
+            --network-passphrase "Test SDF Network ; September 2015" \
+            -- initialize \
+            --admin "$ADMIN_PUBLIC_KEY" \
+            --token "$TOKEN_ADDRESS"
+          
+          echo ""
+          echo "=================================================="
+          echo "  ✅ CONTRACT INITIALIZED!"
+          echo "  Admin : $ADMIN_PUBLIC_KEY"
+          echo "  Token : $TOKEN_ADDRESS (native XLM)"
+          echo "  ID    : $CONTRACT_ID"
+          echo "=================================================="
+
+      - name: Create test market
+        if: ${{ github.event.inputs.initialize == 'yes' }}
+        env:
+          CONTRACT_ID: ${{ steps.deploy.outputs.CONTRACT_ID }}
+          ADMIN_PUBLIC_KEY: ${{ secrets.ADMIN_PUBLIC_KEY }}
+        run: |
+          # Create a sample market: "Will BTC exceed $100k by end of 2025?"
+          FUTURE_TIME=$(date -d "+30 days" +%s)
+          
+          stellar contract invoke \
+            --id "$CONTRACT_ID" \
+            --source admin \
+            --network testnet \
+            --rpc-url https://soroban-testnet.stellar.org \
+            --network-passphrase "Test SDF Network ; September 2015" \
+            -- create_market \
+            --creator "$ADMIN_PUBLIC_KEY" \
+            --question "Will BTC exceed 100k USD by end of 2025?" \
+            --end_time "$FUTURE_TIME"
+          
+          echo "✅ Test market created!"
+
+      - name: Summary
+        run: |
+          echo "## 🚀 Deployment Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Key | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Contract ID | \`${{ steps.deploy.outputs.CONTRACT_ID }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Network | Stellar Testnet |" >> $GITHUB_STEP_SUMMARY
+          echo "| Token | Native XLM (SAC) |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "Update \`backend/.env\`:" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "CONTRACT_ID=${{ steps.deploy.outputs.CONTRACT_ID }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
