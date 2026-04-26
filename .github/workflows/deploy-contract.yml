@@ -25,12 +25,9 @@ jobs:
         with:
           targets: wasm32v1-none
           
-      - name: Install Stellar CLI (Binary)
+      - name: Install Stellar CLI
         run: |
-          wget -qO stellar.tar.gz https://github.com/stellar/stellar-cli/releases/download/v25.2.0/stellar-cli-v25.2.0-x86_64-unknown-linux-gnu.tar.gz
-          mkdir stellar-bin
-          tar -xzf stellar.tar.gz -C stellar-bin --strip-components=1
-          sudo mv stellar-bin/stellar /usr/local/bin/
+          curl -fsSL https://github.com/stellar/stellar-cli/raw/main/install.sh | sh
           stellar --version
           
       - uses: actions/cache@v4
